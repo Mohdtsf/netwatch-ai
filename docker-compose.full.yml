@@ -1,0 +1,62 @@
+# ══════════════════════════════════════════════
+# NetWatch AI — Full Profile Override
+# Total RAM: ~1.2 GB | ML + MLflow tracking
+# For: Dedicated machines, RPi 4 with 4 GB+
+# Usage: docker compose -f docker-compose.yml -f docker-compose.full.yml up -d
+# ══════════════════════════════════════════════
+
+services:
+  # Increase memory limits
+  nats:
+    mem_limit: 128m
+    command: ["--jetstream", "--store_dir=/data", "--max_mem_store=128MB"]
+
+  redis:
+    mem_limit: 128m
+    command: >
+      redis-server
+      --maxmemory 100mb
+      --maxmemory-policy allkeys-lru
+      --appendonly yes
+      --appendfsync everysec
+
+  backend:
+    mem_limit: 512m
+    environment:
+      - SQLITE_CACHE_SIZE_MB=128
+      - ML_ENABLED=true
+
+  capture-agent:
+    mem_limit: 256m
+
+  ml-engine:
+    mem_limit: 512m
+    environment:
+      - MLFLOW_TRACKING=true
+
+  coredns:
+    mem_limit: 128m
+
+  nginx:
+    mem_limit: 64m
+
+  # Add MLflow tracking server
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.17.0
+    container_name: netwatch-mlflow
+    command: >
+      mlflow server
+      --host 0.0.0.0
+      --port 5000
+      --backend-store-uri sqlite:///mlflow/mlflow.db
+      --default-artifact-root /mlflow/artifacts
+    volumes:
+      - mlflow-data:/mlflow
+    ports:
+      - "5000:5000"
+    mem_limit: 256m
+    restart: unless-stopped
+
+volumes:
+  mlflow-data:
+    driver: local

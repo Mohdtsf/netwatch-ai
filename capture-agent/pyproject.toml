@@ -1,0 +1,39 @@
+[project]
+name = "netwatch-capture-agent"
+version = "0.1.0"
+description = "NetWatch AI — Packet Capture Agent"
+requires-python = ">=3.11"
+dependencies = [
+    # ── Packet Capture ─────────────────────────
+    "scapy>=2.6.0",
+    
+    # ── NATS ───────────────────────────────────
+    "nats-py>=2.9.0",
+    
+    # ── GeoIP ──────────────────────────────────
+    "geoip2>=4.8.0",
+    "maxminddb>=2.6.0",
+    
+    # ── Network Discovery ─────────────────────
+    "zeroconf>=0.136.0",
+    "pysnmp>=7.1.0",
+    
+    # ── Utilities ──────────────────────────────
+    "orjson>=3.10.0",
+    "psutil>=6.1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.24.0",
+    "ruff>=0.8.0",
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

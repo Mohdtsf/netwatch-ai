@@ -1,0 +1,41 @@
+# ══════════════════════════════════════════════
+# NetWatch AI — Minimal Profile Override
+# Total RAM: ~512 MB | No ML engine
+# For: Raspberry Pi 3, 2 GB RAM laptops
+# Usage: docker compose -f docker-compose.yml -f docker-compose.minimal.yml up -d
+# ══════════════════════════════════════════════
+
+services:
+  # Disable ML engine entirely
+  ml-engine:
+    profiles:
+      - never    # effectively disables the service
+
+  # Reduce memory limits
+  nats:
+    mem_limit: 32m
+    command: ["--jetstream", "--store_dir=/data", "--max_mem_store=32MB"]
+
+  redis:
+    mem_limit: 32m
+    command: >
+      redis-server
+      --maxmemory 25mb
+      --maxmemory-policy allkeys-lru
+      --appendonly no
+      --save ""
+
+  backend:
+    mem_limit: 192m
+    environment:
+      - SQLITE_CACHE_SIZE_MB=32
+      - ML_ENABLED=false
+
+  capture-agent:
+    mem_limit: 96m
+
+  coredns:
+    mem_limit: 32m
+
+  nginx:
+    mem_limit: 16m

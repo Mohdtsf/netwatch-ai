@@ -1,0 +1,34 @@
+[Unit]
+Description=NetWatch AI — Network Security Platform
+Documentation=https://github.com/yourusername/netwatch
+After=docker.service network-online.target
+Requires=docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/netwatch
+EnvironmentFile=/opt/netwatch/.env
+
+# Determine compose files based on profile
+ExecStartPre=/bin/bash -c 'echo "Starting NetWatch AI (profile: ${NETWATCH_PROFILE:-standard})"'
+ExecStart=/usr/bin/docker compose -f docker-compose.yml up -d
+ExecStop=/usr/bin/docker compose -f docker-compose.yml down
+ExecReload=/usr/bin/docker compose -f docker-compose.yml restart
+
+# Restart policy
+Restart=on-failure
+RestartSec=30
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=netwatch
+
+# Resource limits
+LimitNOFILE=65535
+LimitNPROC=4096
+
+[Install]
+WantedBy=multi-user.target

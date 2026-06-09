@@ -1,0 +1,79 @@
+# ── Environment & Secrets ──────────────────────
+.env
+*.pem
+*.key
+*.crt
+nginx/certs/
+
+# ── Python ─────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+*.cover
+
+# ── Node.js ────────────────────────────────────
+node_modules/
+.next/
+out/
+.turbo/
+*.tsbuildinfo
+
+# ── Data & Models ──────────────────────────────
+data/netwatch.db
+data/netwatch.db-wal
+data/netwatch.db-shm
+data/ml-models/*.pkl
+data/ml-models/*.joblib
+*.mmdb
+
+# ── Docker ─────────────────────────────────────
+docker-compose.override.yml
+
+# ── OS ─────────────────────────────────────────
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# ── IDE ────────────────────────────────────────
+.idea/
+.vscode/
+*.code-workspace
+
+# ── Logs ───────────────────────────────────────
+*.log
+logs/
+
+# ── WireGuard generated configs ───────────────
+wireguard/peers/*.conf
+wireguard/wg0.conf
+
+# ── CoreDNS generated files ───────────────────
+coredns/blocklists/*.hosts
+coredns/per-device/*.conf
+
+# ── Backups ────────────────────────────────────
+backups/
+
+# ── Project Planning & Documentation ───────────
+docs/
+PLAN.md
+PROJECT.md
+IMPLEMENTATION.md
+netwatch-fullplan.md
+PROJECT_PLAN.md
+*.plan
