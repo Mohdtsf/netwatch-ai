@@ -4,6 +4,9 @@ SQLAlchemy async engine with SQLite WAL mode optimizations.
 """
 
 import logging
+import os
+from pathlib import Path
+
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy import event, text
@@ -18,8 +21,22 @@ class Base(DeclarativeBase):
     pass
 
 
-# Build SQLite URL
-_db_url = f"sqlite+aiosqlite:///{settings.SQLITE_DB_PATH}"
+# Build SQLite URL — resolve path and ensure parent directory exists
+_db_path = settings.SQLITE_DB_PATH
+
+# If the path is absolute and starts with /app/ (Docker), adapt for local dev
+if _db_path.startswith("/app/") and not os.path.exists("/app"):
+    # Running locally — use path relative to the backend directory
+    _db_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        "data",
+        "netwatch.db",
+    )
+
+# Ensure the parent directory exists
+Path(_db_path).parent.mkdir(parents=True, exist_ok=True)
+
+_db_url = f"sqlite+aiosqlite:///{_db_path}"
 
 engine = create_async_engine(
     _db_url,

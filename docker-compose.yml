@@ -145,6 +145,27 @@ services:
       timeout: 5s
       retries: 3
 
+  # ── Next.js Frontend ────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: netwatch-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - BACKEND_URL=http://backend:8000
+    volumes:
+      - ./frontend/src:/app/src
+    mem_limit: 256m
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
   # ── Reverse Proxy ───────────────────────────
   nginx:
     image: nginx:alpine
@@ -157,6 +178,7 @@ services:
       - ./nginx/certs:/certs:ro
     depends_on:
       - backend
+      - frontend
     mem_limit: 32m
     restart: unless-stopped
 

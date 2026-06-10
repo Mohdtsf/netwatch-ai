@@ -1,20 +1,21 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // Proxy API requests to FastAPI backend during development
+  // Proxy API requests to FastAPI backend
   async rewrites() {
+    const backendUrl = process.env.BACKEND_URL || "http://localhost:8000";
     return [
       {
         source: "/api/:path*",
-        destination: "http://localhost:8000/api/:path*",
+        destination: `${backendUrl}/api/:path*`,
       },
       {
         source: "/ws/:path*",
-        destination: "http://localhost:8000/ws/:path*",
+        destination: `${backendUrl}/ws/:path*`,
       },
       {
         source: "/health",
-        destination: "http://localhost:8000/health",
+        destination: `${backendUrl}/health`,
       },
     ];
   },

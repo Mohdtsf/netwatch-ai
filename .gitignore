@@ -30,13 +30,14 @@ node_modules/
 out/
 .turbo/
 *.tsbuildinfo
+next-env.d.ts
 
 # ── Data & Models ──────────────────────────────
-data/netwatch.db
-data/netwatch.db-wal
-data/netwatch.db-shm
-data/ml-models/*.pkl
-data/ml-models/*.joblib
+**/data/*.db
+**/data/*.db-wal
+**/data/*.db-shm
+**/data/ml-models/*.pkl
+**/data/ml-models/*.joblib
 *.mmdb
 
 # ── Docker ─────────────────────────────────────
