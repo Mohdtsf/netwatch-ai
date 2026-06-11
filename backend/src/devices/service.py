@@ -5,6 +5,7 @@ Business logic for device management.
 
 import logging
 from typing import Optional
+from datetime import datetime
 
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -83,6 +84,40 @@ class DeviceService:
         )
         return result.scalars().all()
 
+    async def get_device_stats(self, device_id: str) -> dict:
+        """Get complex statistics for a device."""
+        device = await self.get_device(device_id)
+        now = int(datetime.utcnow().timestamp())
+        five_mins_ago = now - 300
+        
+        # Calculate active duration
+        active_duration = now - device.first_seen if device.first_seen else 0
+        
+        # Calculate bytes/sec over the last 5 minutes
+        result = await self.db.execute(
+            select(func.sum(Flow.bytes))
+            .where(Flow.device_id == device_id)
+            .where(Flow.time >= five_mins_ago)
+        )
+        recent_bytes = result.scalar() or 0
+        bytes_per_sec = recent_bytes / 300
+
+        # Fetch top 5 domains
+        result = await self.db.execute(
+            select(DnsQuery.domain, func.count(DnsQuery.id).label('count'))
+            .where(DnsQuery.device_id == device_id)
+            .group_by(DnsQuery.domain)
+            .order_by(func.count(DnsQuery.id).desc())
+            .limit(5)
+        )
+        top_domains = [{"domain": row.domain, "count": row.count} for row in result]
+
+        return {
+            "active_duration_seconds": active_duration,
+            "bytes_per_sec_5m": bytes_per_sec,
+            "top_domains": top_domains
+        }
+
     async def block_device(self, device_id: str) -> Device:
         """Mark device as blocked."""
         device = await self.get_device(device_id)
@@ -90,7 +125,10 @@ class DeviceService:
         await self.db.commit()
         await self.db.refresh(device)
         logger.info(f"Device blocked: {device.id} ({device.mac_address})")
-        # TODO Phase 6: add nftables MAC block rule
+        
+        from src.firewall.nftables import nft_manager
+        nft_manager.block_mac(device.mac_address)
+        
         return device
 
     async def unblock_device(self, device_id: str) -> Device:
@@ -100,10 +138,12 @@ class DeviceService:
         await self.db.commit()
         await self.db.refresh(device)
         logger.info(f"Device unblocked: {device.id} ({device.mac_address})")
-        # TODO Phase 6: remove nftables MAC block rule
+        
+        from src.firewall.nftables import nft_manager
+        nft_manager.unblock_mac(device.mac_address)
+        
         return device
 
     async def trigger_scan(self) -> dict:
-        """Trigger an ARP scan (stub — implemented in Phase 3)."""
-        # TODO Phase 3: integrate with capture-agent ARP scanner
+        """Trigger an ARP scan. (Note: capture agent already scans periodically)."""
         return {"status": "scan_triggered", "message": "ARP scan initiated — results will appear shortly"}

@@ -18,6 +18,7 @@ router = APIRouter()
 # Connection registries
 live_traffic_clients: Set[WebSocket] = set()
 alert_clients: Set[WebSocket] = set()
+device_clients: Set[WebSocket] = set()
 
 
 @router.websocket("/ws/live")
@@ -33,7 +34,6 @@ async def ws_live_traffic(websocket: WebSocket):
     try:
         while True:
             # Send heartbeat every 30 seconds to keep connection alive
-            # In Phase 3, this will be replaced by NATS subscription forwarding
             await asyncio.sleep(30)
             await websocket.send_json({
                 "type": "heartbeat",
@@ -103,3 +103,42 @@ async def broadcast_alert(data: dict):
             disconnected.add(ws)
     if disconnected:
         alert_clients.difference_update(disconnected)
+
+@router.websocket("/ws/devices")
+async def ws_devices(websocket: WebSocket):
+    """
+    Real-time device events stream.
+    Clients receive new device discovery and status changes.
+    """
+    await websocket.accept()
+    device_clients.add(websocket)
+    logger.info(f"WebSocket /ws/devices connected — {len(device_clients)} clients")
+
+    try:
+        while True:
+            await asyncio.sleep(30)
+            await websocket.send_json({
+                "type": "heartbeat",
+                "timestamp": int(datetime.now(timezone.utc).timestamp()),
+                "message": "Device WebSocket alive",
+            })
+    except WebSocketDisconnect:
+        device_clients.discard(websocket)
+        logger.info(f"WebSocket /ws/devices disconnected — {len(device_clients)} clients")
+    except Exception as e:
+        device_clients.discard(websocket)
+        logger.error(f"WebSocket /ws/devices error: {e}")
+
+async def broadcast_device(data: dict):
+    """Broadcast device data to all connected device clients."""
+    if not device_clients:
+        return
+    message = json.dumps(data)
+    disconnected = set()
+    for ws in device_clients:
+        try:
+            await ws.send_text(message)
+        except Exception:
+            disconnected.add(ws)
+    if disconnected:
+        device_clients.difference_update(disconnected)

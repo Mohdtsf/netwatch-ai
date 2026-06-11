@@ -18,6 +18,7 @@ from src.geoip import GeoIPEnricher
 from src.mac_vendor import MacVendorLookup
 from src.nats_producer import NatsProducer
 from src.arp_scanner import ArpScanner
+from src.dhcp_parser import DhcpParser
 
 logger = logging.getLogger("netwatch.capture")
 logging.basicConfig(
@@ -71,13 +72,29 @@ async def main():
     sniffer.add_handler(flows.process)
 
     arp = ArpScanner(subnet=SCAN_SUBNET, interface=CAPTURE_INTERFACE)
+    dhcp = DhcpParser()
 
     # Background tasks
     async def arp_loop():
         while not stop_event.is_set():
             devices = await arp.scan()
+            devices.extend(arp.read_arp_cache())
+            
+            seen_macs = set()
+            unique_devices = []
+            hostnames = dhcp.get_hostnames()
+            
             for dev in devices:
-                dev["vendor"] = mac_vendor.lookup(dev["mac"])
+                mac = dev["mac"].lower()
+                if mac not in seen_macs:
+                    seen_macs.add(mac)
+                    dev["mac"] = mac
+                    dev["vendor"] = mac_vendor.lookup(mac)
+                    if mac in hostnames:
+                        dev["hostname"] = hostnames[mac]
+                    unique_devices.append(dev)
+                    
+            for dev in unique_devices:
                 if nats.connected:
                     await nats.publish("netwatch.devices.events", json.dumps(dev).encode('utf-8'))
             try:

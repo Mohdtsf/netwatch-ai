@@ -121,6 +121,20 @@ async def get_device_dns(
     return {"dns_queries": dns_queries, "total": len(dns_queries)}
 
 
+@router.get(
+    "/{device_id}/stats",
+    summary="Get device statistics",
+)
+async def get_device_stats(
+    device_id: str,
+    current_user=Depends(require_role("viewer")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get calculated statistics for a specific device."""
+    service = DeviceService(db)
+    return await service.get_device_stats(device_id)
+
+
 @router.post(
     "/{device_id}/block",
     response_model=DeviceResponse,

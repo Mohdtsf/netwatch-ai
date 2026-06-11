@@ -38,10 +38,36 @@ class MacVendorLookup:
             if os.path.exists(MAC_VENDORS_PATH):
                 with open(MAC_VENDORS_PATH, "r") as f:
                     self._vendors = json.load(f)
-                logger.info(f"✅ MAC vendor database loaded ({len(self._vendors)} entries)")
+                logger.info(f"✅ MAC vendor database loaded from JSON ({len(self._vendors)} entries)")
                 self._loaded = True
         except Exception as e:
-            logger.warning(f"Error loading MAC vendors: {e}")
+            logger.warning(f"Error loading MAC vendors from JSON: {e}")
+
+        # Fallback or additional load from CSV
+        csv_path = os.getenv("MAC_VENDORS_CSV_PATH", "/home/tauseef/Tauseef/Programming/Projects/netwatch/data/oui.csv")
+        # In case we are running inside docker or differently configured
+        if not os.path.exists(csv_path):
+            csv_path = os.path.join(os.path.dirname(__file__), "..", "..", "data", "oui.csv")
+            
+        if os.path.exists(csv_path):
+            try:
+                import csv
+                count = 0
+                with open(csv_path, "r", encoding="utf-8") as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        oui = row.get("Assignment", "").strip().upper()
+                        org = row.get("Organization Name", "").strip()
+                        if oui and org and oui not in self._vendors:
+                            self._vendors[oui] = org
+                            count += 1
+                logger.info(f"✅ MAC vendor database loaded from CSV ({count} new entries)")
+                self._loaded = True
+            except Exception as e:
+                logger.warning(f"Error loading MAC vendors from CSV: {e}")
+                
+        if not self._loaded:
+            logger.info("No MAC vendor database found (JSON or CSV).")
 
     def lookup(self, mac: str) -> str | None:
         """
