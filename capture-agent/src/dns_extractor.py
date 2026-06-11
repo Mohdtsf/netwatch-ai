@@ -29,9 +29,38 @@ class DnsExtractor:
         Process a DNS packet.
         
         Returns a dict with query info if this is a DNS query, None otherwise.
-        TODO Phase 3: Implement with Scapy DNS layer parsing.
         """
-        pass
+        from scapy.layers.dns import DNS, DNSRR, DNSQR
+        from scapy.layers.inet import IP
+
+        if not packet.haslayer(DNS):
+            return None
+
+        ip_layer = packet.getlayer(IP)
+        if not ip_layer:
+            return None
+
+        dns_layer = packet.getlayer(DNS)
+        
+        # Check if it's a DNS response
+        if dns_layer.qr == 1 and dns_layer.ancount > 0:
+            self._response_count += 1
+            for i in range(dns_layer.ancount):
+                answer = dns_layer.an[i]
+                if isinstance(answer, DNSRR) and answer.type == 1: # A record
+                    domain = answer.rrname.decode('utf-8').rstrip('.')
+                    ip = answer.rdata
+                    self._cache_put(ip, domain)
+                    
+        # Check if it's a DNS query
+        elif dns_layer.qr == 0 and dns_layer.qdcount > 0:
+            self._query_count += 1
+            query = dns_layer.qd[0]
+            if isinstance(query, DNSQR):
+                domain = query.qname.decode('utf-8').rstrip('.')
+                return {"domain": domain, "src_ip": ip_layer.src}
+
+        return None
 
     def lookup(self, ip: str) -> Optional[str]:
         """Look up a domain name for an IP address from the cache."""

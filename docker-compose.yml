@@ -83,7 +83,7 @@ services:
     container_name: netwatch-capture
     env_file: .env
     environment:
-      - NATS_URL=nats://nats:4222
+      - NATS_URL=nats://127.0.0.1:4222
     network_mode: host    # required for raw packet capture
     cap_add:
       - NET_RAW

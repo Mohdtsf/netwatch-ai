@@ -33,11 +33,7 @@ out/
 next-env.d.ts
 
 # ── Data & Models ──────────────────────────────
-**/data/*.db
-**/data/*.db-wal
-**/data/*.db-shm
-**/data/ml-models/*.pkl
-**/data/ml-models/*.joblib
+**/data/
 *.mmdb
 
 # ── Docker ─────────────────────────────────────
@@ -69,6 +65,9 @@ coredns/per-device/*.conf
 
 # ── Backups ────────────────────────────────────
 backups/
+
+# ── Local scratch scripts ──────────────────────
+/test_phase3_ws.py
 
 # ── Project Planning & Documentation ───────────
 docs/

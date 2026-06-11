@@ -67,7 +67,7 @@ class Settings(BaseSettings):
     # ── GeoIP ─────────────────────────────────
     MAXMIND_LICENSE_KEY: str = ""
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
+    model_config = {"env_file": ["../.env", ".env"], "env_file_encoding": "utf-8", "extra": "ignore"}
 
 
 settings = Settings()

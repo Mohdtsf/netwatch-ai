@@ -60,6 +60,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     try:
         from src.core.nats_client import init_nats
         await init_nats()
+        
+        # Start Flow Consumer
+        from src.flows.consumer import flow_consumer
+        await flow_consumer.start()
+        
     except Exception as e:
         logger.warning(f"⚠️  NATS connection failed (messaging disabled): {e}")
 
@@ -78,6 +83,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await stop_scheduler()
 
     try:
+        from src.flows.consumer import flow_consumer
+        await flow_consumer.stop()
+        
         from src.core.nats_client import close_nats
         await close_nats()
     except Exception:

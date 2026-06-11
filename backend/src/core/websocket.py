@@ -86,7 +86,8 @@ async def broadcast_traffic(data: dict):
             await ws.send_text(message)
         except Exception:
             disconnected.add(ws)
-    live_traffic_clients -= disconnected
+    if disconnected:
+        live_traffic_clients.difference_update(disconnected)
 
 
 async def broadcast_alert(data: dict):
@@ -100,4 +101,5 @@ async def broadcast_alert(data: dict):
             await ws.send_text(message)
         except Exception:
             disconnected.add(ws)
-    alert_clients -= disconnected
+    if disconnected:
+        alert_clients.difference_update(disconnected)

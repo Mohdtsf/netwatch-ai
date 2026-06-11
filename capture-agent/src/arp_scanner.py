@@ -30,10 +30,42 @@ class ArpScanner:
         Perform an ARP scan of the subnet.
         
         Returns a list of dicts with: ip, mac, vendor
-        TODO Phase 3: Implement with Scapy ARP.
         """
-        logger.info(f"ARP scan stub: {self.subnet} on {self.interface}")
-        return []
+        import asyncio
+        from scapy.layers.l2 import ARP, Ether
+        from scapy.sendrecv import srp
+
+        logger.debug(f"Starting ARP scan on {self.subnet} via {self.interface}")
+        devices = []
+        
+        try:
+            # Create ARP request packet
+            arp = ARP(pdst=self.subnet)
+            ether = Ether(dst="ff:ff:ff:ff:ff:ff")
+            packet = ether / arp
+
+            # Send packet and wait for response in a background thread to not block async loop
+            loop = asyncio.get_running_loop()
+            result, _ = await loop.run_in_executor(
+                None, 
+                lambda: srp(packet, timeout=2, iface=self.interface, verbose=0)
+            )
+
+            # Process responses
+            for sent, received in result:
+                devices.append({
+                    "ip": received.psrc,
+                    "mac": received.hwsrc,
+                    "interface": self.interface
+                })
+                
+            self._last_scan = devices
+            logger.debug(f"ARP scan found {len(devices)} devices")
+            
+        except Exception as e:
+            logger.error(f"ARP scan failed: {e}")
+            
+        return devices
 
     def read_arp_cache(self) -> list[dict]:
         """

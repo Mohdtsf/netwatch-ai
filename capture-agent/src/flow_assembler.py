@@ -68,10 +68,63 @@ class FlowAssembler:
 
     def process(self, packet) -> Optional[Flow]:
         """
-        Process a packet and return a completed flow if the timeout expired.
-        TODO Phase 3: Implement with Scapy packet parsing.
+        Process a packet and update or create a flow.
         """
-        pass
+        from scapy.layers.inet import IP, TCP, UDP
+        
+        if not packet.haslayer(IP):
+            return None
+
+        ip_layer = packet.getlayer(IP)
+        src_ip = ip_layer.src
+        dst_ip = ip_layer.dst
+        
+        protocol = "other"
+        src_port = 0
+        dst_port = 0
+        
+        if packet.haslayer(TCP):
+            protocol = "tcp"
+            src_port = packet[TCP].sport
+            dst_port = packet[TCP].dport
+        elif packet.haslayer(UDP):
+            protocol = "udp"
+            src_port = packet[UDP].sport
+            dst_port = packet[UDP].dport
+            
+        flow_key = f"{src_ip}:{src_port}->{dst_ip}:{dst_port}/{protocol}"
+        rev_flow_key = f"{dst_ip}:{dst_port}->{src_ip}:{src_port}/{protocol}"
+        
+        now = time.time()
+        packet_len = len(packet)
+        
+        # Check if flow already exists
+        if flow_key in self._active_flows:
+            flow = self._active_flows[flow_key]
+            flow.packets += 1
+            flow.bytes += packet_len
+            flow.last_time = now
+        elif rev_flow_key in self._active_flows:
+            flow = self._active_flows[rev_flow_key]
+            flow.packets += 1
+            flow.bytes += packet_len
+            flow.last_time = now
+        else:
+            # Create new flow
+            flow = Flow(
+                src_ip=src_ip,
+                dst_ip=dst_ip,
+                src_port=src_port,
+                dst_port=dst_port,
+                protocol=protocol,
+                bytes=packet_len,
+                packets=1,
+                start_time=now,
+                last_time=now
+            )
+            self._active_flows[flow_key] = flow
+            
+        return None
 
     def flush_expired(self) -> list[Flow]:
         """Flush all flows that have exceeded the timeout."""

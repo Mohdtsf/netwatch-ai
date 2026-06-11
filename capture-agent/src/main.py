@@ -1,21 +1,23 @@
 """
 NetWatch AI — Capture Agent
 Main entrypoint for the packet capture and network discovery service.
-
-This service runs with network_mode: host and CAP_NET_RAW to:
-1. Capture packets in promiscuous mode via Scapy
-2. Extract DNS queries and TLS SNI fields
-3. Assemble flows (5-tuple grouping)
-4. Enrich with GeoIP and MAC vendor data
-5. Publish enriched flows to NATS JetStream
-6. Run periodic ARP scans for device discovery
 """
 
 import asyncio
+import json
 import logging
 import os
 import signal
 import sys
+
+from src.sniffer import PacketSniffer
+from src.dns_extractor import DnsExtractor
+from src.sni_extractor import SniExtractor
+from src.flow_assembler import FlowAssembler
+from src.geoip import GeoIPEnricher
+from src.mac_vendor import MacVendorLookup
+from src.nats_producer import NatsProducer
+from src.arp_scanner import ArpScanner
 
 logger = logging.getLogger("netwatch.capture")
 logging.basicConfig(
@@ -39,16 +41,6 @@ async def main():
     logger.info(f"  NATS:      {NATS_URL}")
     logger.info("═" * 50)
 
-    # TODO Phase 3: Initialize NATS connection
-    # TODO Phase 3: Start Scapy sniffer in background thread
-    # TODO Phase 3: Start flow assembler
-    # TODO Phase 3: Start ARP scanner (every 30 seconds)
-    # TODO Phase 4: Start mDNS listener
-    # TODO Phase 4: Start SSDP/UPnP discovery
-
-    logger.info("🚀 Capture Agent ready (stub — waiting for Phase 3)")
-
-    # Keep the agent running
     stop_event = asyncio.Event()
 
     def signal_handler():
@@ -59,7 +51,79 @@ async def main():
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, signal_handler)
 
+    # Initialize components
+    nats = NatsProducer(url=NATS_URL)
+    await nats.connect()
+
+    geoip = GeoIPEnricher()
+    geoip.load()
+
+    mac_vendor = MacVendorLookup()
+    mac_vendor.load()
+
+    dns = DnsExtractor()
+    sni = SniExtractor()
+    flows = FlowAssembler()
+
+    sniffer = PacketSniffer(interface=CAPTURE_INTERFACE)
+    sniffer.add_handler(dns.process)
+    sniffer.add_handler(sni.process)
+    sniffer.add_handler(flows.process)
+
+    arp = ArpScanner(subnet=SCAN_SUBNET, interface=CAPTURE_INTERFACE)
+
+    # Background tasks
+    async def arp_loop():
+        while not stop_event.is_set():
+            devices = await arp.scan()
+            for dev in devices:
+                dev["vendor"] = mac_vendor.lookup(dev["mac"])
+                if nats.connected:
+                    await nats.publish("netwatch.devices.events", json.dumps(dev).encode('utf-8'))
+            try:
+                await asyncio.sleep(30)
+            except asyncio.CancelledError:
+                break
+
+    async def flow_flush_loop():
+        while not stop_event.is_set():
+            expired = flows.flush_expired()
+            for flow in expired:
+                # Enrich with Domain
+                if not flow.domain:
+                    flow.domain = dns.lookup(flow.dst_ip)
+                
+                # Enrich with GeoIP
+                country, asn = geoip.lookup(flow.dst_ip)
+                if country:
+                    flow.country = country
+                if asn:
+                    flow.asn = asn
+
+                # Publish to NATS
+                if nats.connected:
+                    await nats.publish("netwatch.flows.raw", json.dumps(flow.to_dict()).encode('utf-8'))
+            try:
+                await asyncio.sleep(1)
+            except asyncio.CancelledError:
+                break
+
+    await sniffer.start()
+    logger.info("🚀 Capture Agent ready")
+
+    arp_task = asyncio.create_task(arp_loop())
+    flow_task = asyncio.create_task(flow_flush_loop())
+
     await stop_event.wait()
+    logger.info("👋 Capture Agent stopping...")
+    
+    arp_task.cancel()
+    flow_task.cancel()
+    
+    await sniffer.stop()
+    await nats.close()
+    geoip.close()
+    
     logger.info("👋 Capture Agent stopped")
 
 

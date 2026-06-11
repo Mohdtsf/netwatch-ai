@@ -29,9 +29,26 @@ class SniExtractor:
         Extract SNI from a TLS ClientHello packet.
         
         Returns the domain name if found, None otherwise.
-        TODO Phase 3: Implement TLS ClientHello parsing.
         """
-        pass
+        from scapy.layers.inet import TCP, IP
+        from scapy.layers.tls.all import TLS, TLSClientHello, TLS_Ext_ServerName
+        
+        if not packet.haslayer(TCP) or not packet.haslayer(TLS):
+            return None
+            
+        tls_layer = packet.getlayer(TLS)
+        if not tls_layer.haslayer(TLSClientHello):
+            return None
+            
+        hello = tls_layer.getlayer(TLSClientHello)
+        if hello.haslayer(TLS_Ext_ServerName):
+            ext = hello.getlayer(TLS_Ext_ServerName)
+            if ext.servernames:
+                sni = ext.servernames[0].servername.decode('utf-8')
+                self._sni_count += 1
+                return sni
+                
+        return None
 
     @property
     def stats(self) -> dict:
