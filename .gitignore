@@ -33,7 +33,16 @@ out/
 next-env.d.ts
 
 # ── Data & Models ──────────────────────────────
-**/data/
+data/*
+!data/mac-vendors.json
+!data/oui.csv
+!data/ml-models/
+data/ml-models/*
+!data/ml-models/.gitkeep
+
+backend/data/*
+!backend/data/blocklist_config.json
+
 *.mmdb
 
 # ── Docker ─────────────────────────────────────
@@ -63,6 +72,10 @@ wireguard/wg0.conf
 coredns/blocklists/*.hosts
 coredns/blocklists/*.conf
 coredns/per-device/*.conf
+
+# ── Firewall generated configs ────────────────
+*.nft
+!backend/src/firewall/base.nft
 
 # ── Backups ────────────────────────────────────
 backups/

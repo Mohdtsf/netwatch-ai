@@ -1,0 +1,11 @@
+{
+    "enabled_lists": [
+        "multi_pro",
+        "threat_intel",
+        "fake",
+        "popup_ads"
+    ],
+    "custom_urls": [
+        "https://urlhaus.abuse.ch/downloads/hostfile/"
+    ]
+}

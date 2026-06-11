@@ -69,16 +69,28 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         from src.devices.processor import device_processor
         await device_processor.start()
         
+        # Start Alert Processor
+        from src.alerts.processor import alert_processor
+        await alert_processor.start()
+        
     except Exception as e:
         logger.warning(f"⚠️  NATS connection failed (messaging disabled): {e}")
 
-    # 4. Initialize nftables DNS rules
+    # 4. Initialize nftables firewall and DNS rules
     try:
+        from src.firewall.setup import load_base_nftables
         from src.firewall.nftables import nft_manager
+        from src.firewall.service import FirewallService
+        from src.core.database import async_session
+        
+        load_base_nftables()
         nft_manager.enable_dns_redirection()
         nft_manager.block_dot()
+        
+        async with async_session() as db:
+            await FirewallService.sync_all_rules(db)
     except Exception as e:
-        logger.warning(f"⚠️  Failed to set up nftables DNS rules: {e}")
+        logger.warning(f"⚠️  Failed to set up nftables firewall rules: {e}")
 
     # 5. Start APScheduler
     from src.core.scheduler import start_scheduler
@@ -100,6 +112,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         
         from src.devices.processor import device_processor
         await device_processor.stop()
+        
+        from src.alerts.processor import alert_processor
+        await alert_processor.stop()
         
         from src.core.nats_client import close_nats
         await close_nats()
@@ -155,6 +170,7 @@ from src.flows.router import router as flows_router
 from src.alerts.router import router as alerts_router
 from src.core.websocket import router as ws_router
 from src.dns.router import router as dns_router
+from src.firewall.router import router as firewall_router
 
 app.include_router(auth_router)
 app.include_router(devices_router)
@@ -162,6 +178,7 @@ app.include_router(flows_router)
 app.include_router(alerts_router)
 app.include_router(ws_router)
 app.include_router(dns_router)
+app.include_router(firewall_router)
 
 
 # ── Health Check ──────────────────────────────

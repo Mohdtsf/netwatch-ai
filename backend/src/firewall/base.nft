@@ -1,0 +1,47 @@
+flush table inet netwatch
+
+table inet netwatch {
+    set blocked_ips {
+        type ipv4_addr
+        flags interval
+    }
+
+    set blocked_macs {
+        type ether_addr
+    }
+
+    set blocked_ports {
+        type inet_service
+    }
+
+    set rate_limited {
+        type ipv4_addr
+        flags dynamic
+    }
+
+    chain input {
+        type filter hook input priority filter; policy accept;
+        ct state invalid drop
+        ip saddr @blocked_ips drop
+        tcp dport @blocked_ports drop
+        udp dport @blocked_ports drop
+    }
+
+    chain forward {
+        type filter hook forward priority filter; policy accept;
+        ether saddr @blocked_macs drop
+        ip saddr @blocked_ips drop
+        ip daddr @blocked_ips drop
+        tcp dport @blocked_ports drop
+        udp dport @blocked_ports drop
+        # Limit rate
+        ip saddr @rate_limited limit rate over 100/second drop
+    }
+
+    chain prerouting {
+        type nat hook prerouting priority dstnat; policy accept;
+        # Redirect all DNS (port 53) to local CoreDNS listener.
+        udp dport 53 redirect to :53
+        tcp dport 53 redirect to :53
+    }
+}

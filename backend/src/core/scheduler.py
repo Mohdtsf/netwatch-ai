@@ -111,6 +111,16 @@ async def start_scheduler():
     import asyncio
     asyncio.create_task(tail_dns_logs())
 
+    # Firewall cleanup job (runs every minute)
+    from src.firewall.scheduler import cleanup_expired_firewall_rules
+    scheduler.add_job(
+        cleanup_expired_firewall_rules,
+        IntervalTrigger(minutes=1),
+        id="firewall_rule_cleanup",
+        name="Clean up expired firewall rules",
+        replace_existing=True,
+    )
+
 
 async def stop_scheduler():
     """Gracefully stop the scheduler."""
