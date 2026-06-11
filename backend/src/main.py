@@ -72,7 +72,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as e:
         logger.warning(f"⚠️  NATS connection failed (messaging disabled): {e}")
 
-    # 4. Start APScheduler
+    # 4. Initialize nftables DNS rules
+    try:
+        from src.firewall.nftables import nft_manager
+        nft_manager.enable_dns_redirection()
+        nft_manager.block_dot()
+    except Exception as e:
+        logger.warning(f"⚠️  Failed to set up nftables DNS rules: {e}")
+
+    # 5. Start APScheduler
     from src.core.scheduler import start_scheduler
     await start_scheduler()
     logger.info("✅ APScheduler started")
@@ -146,12 +154,14 @@ from src.devices.router import router as devices_router
 from src.flows.router import router as flows_router
 from src.alerts.router import router as alerts_router
 from src.core.websocket import router as ws_router
+from src.dns.router import router as dns_router
 
 app.include_router(auth_router)
 app.include_router(devices_router)
 app.include_router(flows_router)
 app.include_router(alerts_router)
 app.include_router(ws_router)
+app.include_router(dns_router)
 
 
 # ── Health Check ──────────────────────────────

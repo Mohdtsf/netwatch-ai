@@ -32,7 +32,38 @@ class NftablesManager:
         self._run_cmd(["nft", "add", "table", "bridge", self.table_name])
         # Add base chain for MAC filtering
         self._run_cmd(["nft", "add", "chain", "bridge", self.table_name, "mac_filter", "{ type filter hook prerouting priority -200; policy accept; }"])
-        logger.debug("Ensured nftables netwatch table and mac_filter chain exist")
+        
+        # Add ip/ip6 table for NAT and L3 filtering
+        self._run_cmd(["nft", "add", "table", "ip", self.table_name])
+        self._run_cmd(["nft", "add", "chain", "ip", self.table_name, "prerouting", "{ type nat hook prerouting priority -100; policy accept; }"])
+        self._run_cmd(["nft", "add", "chain", "ip", self.table_name, "forward", "{ type filter hook forward priority 0; policy accept; }"])
+        
+        logger.debug("Ensured nftables netwatch table and chains exist")
+
+    def enable_dns_redirection(self):
+        """Redirect all port 53 traffic to the local CoreDNS listener."""
+        # Check if already exists or just add (nftables allows duplicate additions if not exact same, but we can flush or just add)
+        # We will redirect DNS to 127.0.0.1:53 if it's on the host, but actually just intercept it.
+        # nft add rule ip netwatch prerouting udp dport 53 redirect to :53
+        # nft add rule ip netwatch prerouting tcp dport 53 redirect to :53
+        
+        udp_cmd = ["nft", "add", "rule", "ip", self.table_name, "prerouting", "udp", "dport", "53", "redirect", "to", ":53"]
+        tcp_cmd = ["nft", "add", "rule", "ip", self.table_name, "prerouting", "tcp", "dport", "53", "redirect", "to", ":53"]
+        
+        self._run_cmd(udp_cmd)
+        self._run_cmd(tcp_cmd)
+        logger.info("Enabled DNS redirection (DNAT) to local CoreDNS listener")
+
+    def block_dot(self):
+        """Block DoT (DNS over TLS) on port 853 to prevent evasion."""
+        # nft add rule ip netwatch forward tcp dport 853 drop
+        # nft add rule ip netwatch forward udp dport 853 drop
+        udp_cmd = ["nft", "add", "rule", "ip", self.table_name, "forward", "udp", "dport", "853", "drop"]
+        tcp_cmd = ["nft", "add", "rule", "ip", self.table_name, "forward", "tcp", "dport", "853", "drop"]
+        
+        self._run_cmd(udp_cmd)
+        self._run_cmd(tcp_cmd)
+        logger.info("Enabled DoT (Port 853) blocking")
 
     def block_mac(self, mac_address: str) -> bool:
         """Add a rule to drop all traffic from a specific MAC address."""

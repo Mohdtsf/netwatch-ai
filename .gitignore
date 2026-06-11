@@ -61,6 +61,7 @@ wireguard/wg0.conf
 
 # ── CoreDNS generated files ───────────────────
 coredns/blocklists/*.hosts
+coredns/blocklists/*.conf
 coredns/per-device/*.conf
 
 # ── Backups ────────────────────────────────────

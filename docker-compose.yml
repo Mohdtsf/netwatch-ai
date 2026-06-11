@@ -128,16 +128,17 @@ services:
 
   # ── DNS Firewall ────────────────────────────
   coredns:
-    image: coredns/coredns:1.12.0
+    build:
+      context: ./coredns
+      dockerfile: Dockerfile
     container_name: netwatch-coredns
-    command: -conf /etc/coredns/Corefile
     ports:
       - "53:53/udp"
       - "53:53/tcp"
       - "8082:8082"   # health
     volumes:
       - ./coredns:/etc/coredns
-    mem_limit: 64m
+    mem_limit: 512m
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8082/health"]

@@ -59,6 +59,11 @@ async def admin_user_check():
         service = AuthService(db=db)
         await service.create_initial_admin()
 
+async def blocklist_update_job():
+    """Daily job to update DNS blocklists."""
+    from src.dns.blocklist_updater import update_blocklists
+    await update_blocklists()
+
 
 # ── Scheduler Lifecycle ────────────────────────
 
@@ -91,6 +96,20 @@ async def start_scheduler():
 
     # Run admin user check once on startup (not recurring)
     await admin_user_check()
+
+    # Start DNS blocklist updater job (runs daily at 4:00 AM)
+    scheduler.add_job(
+        blocklist_update_job,
+        CronTrigger(hour=4, minute=0),
+        id="blocklist_update",
+        name="Update DNS blocklists",
+        replace_existing=True,
+    )
+
+    # Start the continuous DNS log tailer as a background asyncio task
+    from src.dns.log_tailer import tail_dns_logs
+    import asyncio
+    asyncio.create_task(tail_dns_logs())
 
 
 async def stop_scheduler():

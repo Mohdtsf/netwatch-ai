@@ -19,6 +19,7 @@ router = APIRouter()
 live_traffic_clients: Set[WebSocket] = set()
 alert_clients: Set[WebSocket] = set()
 device_clients: Set[WebSocket] = set()
+dns_clients: Set[WebSocket] = set()
 
 
 @router.websocket("/ws/live")
@@ -142,3 +143,42 @@ async def broadcast_device(data: dict):
             disconnected.add(ws)
     if disconnected:
         device_clients.difference_update(disconnected)
+
+@router.websocket("/ws/dns")
+async def ws_dns(websocket: WebSocket):
+    """
+    Real-time DNS query stream.
+    Clients receive parsed DNS queries as they occur.
+    """
+    await websocket.accept()
+    dns_clients.add(websocket)
+    logger.info(f"WebSocket /ws/dns connected — {len(dns_clients)} clients")
+
+    try:
+        while True:
+            await asyncio.sleep(30)
+            await websocket.send_json({
+                "type": "heartbeat",
+                "timestamp": int(datetime.now(timezone.utc).timestamp()),
+                "message": "DNS WebSocket alive",
+            })
+    except WebSocketDisconnect:
+        dns_clients.discard(websocket)
+        logger.info(f"WebSocket /ws/dns disconnected — {len(dns_clients)} clients")
+    except Exception as e:
+        dns_clients.discard(websocket)
+        logger.error(f"WebSocket /ws/dns error: {e}")
+
+async def broadcast_dns(data: dict):
+    """Broadcast DNS query data to all connected DNS clients."""
+    if not dns_clients:
+        return
+    message = json.dumps(data)
+    disconnected = set()
+    for ws in dns_clients:
+        try:
+            await ws.send_text(message)
+        except Exception:
+            disconnected.add(ws)
+    if disconnected:
+        dns_clients.difference_update(disconnected)
