@@ -11,7 +11,8 @@ import numpy as np
 
 logger = logging.getLogger("netwatch.ml.isolation_forest")
 
-MODEL_PATH = "/app/data/ml-models/isolation_forest.pkl"
+MODEL_PATH = os.getenv("ISOLATION_FOREST_MODEL_PATH", "/app/data/ml-models/isolation_forest.pkl")
+
 
 
 class AnomalyDetector:
@@ -51,7 +52,7 @@ class AnomalyDetector:
             import joblib
             saved = joblib.load(MODEL_PATH)
             self._model = saved["model"]
-            self._scaler = saved["scaler"]
+            self._scaler = saved.get("scaler")
             self._loaded = True
             logger.info("✅ Isolation Forest model loaded")
             return True
@@ -65,9 +66,25 @@ class AnomalyDetector:
         
         Args:
             features: 2D numpy array of shape (n_samples, n_features)
-        TODO Phase 8: Implement training pipeline.
         """
-        pass
+        logger.info("Training Isolation Forest...")
+        os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
+        from sklearn.ensemble import IsolationForest
+        self._model = IsolationForest(n_estimators=100, contamination=self.contamination, random_state=42)
+        self._model.fit(features)
+        
+        import joblib
+        joblib.dump({"model": self._model}, MODEL_PATH)
+        self._loaded = True
+        logger.info("✅ Isolation Forest trained and saved")
+        
+        try:
+            import mlflow
+            import mlflow.sklearn
+            if mlflow.active_run():
+                mlflow.sklearn.log_model(self._model, "isolation_forest")
+        except ImportError:
+            pass
 
     def predict(self, features: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """
@@ -75,10 +92,14 @@ class AnomalyDetector:
         
         Returns:
             (scores, labels) where scores < threshold are anomalies
-        TODO Phase 8: Implement inference.
         """
-        n = len(features)
-        return np.zeros(n), np.ones(n)  # All normal (stub)
+        if not self._loaded:
+            n = len(features)
+            return np.zeros(n), np.ones(n)
+            
+        scores = self._model.decision_function(features)
+        labels = np.where(scores < self.threshold, -1, 1)
+        return scores, labels
 
     @property
     def is_loaded(self) -> bool:

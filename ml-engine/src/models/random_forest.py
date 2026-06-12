@@ -11,7 +11,8 @@ import numpy as np
 
 logger = logging.getLogger("netwatch.ml.random_forest")
 
-MODEL_PATH = "/app/data/ml-models/random_forest.pkl"
+MODEL_PATH = os.getenv("RANDOM_FOREST_MODEL_PATH", "/app/data/ml-models/random_forest.pkl")
+
 
 THREAT_LABELS = [
     "Normal",
@@ -57,7 +58,7 @@ class ThreatClassifier:
             import joblib
             saved = joblib.load(MODEL_PATH)
             self._model = saved["model"]
-            self._scaler = saved["scaler"]
+            self._scaler = saved.get("scaler")
             self._loaded = True
             logger.info("✅ Random Forest classifier loaded")
             return True
@@ -65,12 +66,35 @@ class ThreatClassifier:
             logger.error(f"Failed to load model: {e}")
             return False
 
+    def train(self, features: np.ndarray, labels: np.ndarray):
+        """Train Random Forest Threat Classifier."""
+        logger.info("Training Random Forest Threat Classifier...")
+        os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
+        from sklearn.ensemble import RandomForestClassifier
+        self._model = RandomForestClassifier(n_estimators=50, max_depth=10, random_state=42)
+        self._model.fit(features, labels)
+        
+        import joblib
+        joblib.dump({"model": self._model}, MODEL_PATH)
+        self._loaded = True
+        logger.info("✅ Random Forest trained and saved")
+        
+        try:
+            import mlflow
+            import mlflow.sklearn
+            if mlflow.active_run():
+                mlflow.sklearn.log_model(self._model, "random_forest")
+        except ImportError:
+            pass
+
     def predict(self, features: np.ndarray) -> list[str]:
-        """
-        Classify anomalous flows into threat types.
-        TODO Phase 8: Implement inference.
-        """
-        return ["Normal"] * len(features)  # Stub
+        """Classify anomalous flows into threat types."""
+        if not self._loaded:
+            return ["Normal"] * len(features)
+            
+        predictions = self._model.predict(features)
+        # Handle cases where label index is out of bounds just in case
+        return [THREAT_LABELS[i] if i < len(THREAT_LABELS) else "Unknown" for i in predictions]
 
     @property
     def is_loaded(self) -> bool:

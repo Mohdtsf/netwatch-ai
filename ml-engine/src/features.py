@@ -4,8 +4,10 @@ Transforms raw flow data into ML-ready feature vectors.
 """
 
 import logging
-import math
+import time
 from typing import Optional
+
+import numpy as np
 
 logger = logging.getLogger("netwatch.ml.features")
 
@@ -23,49 +25,61 @@ GEO_RISK_SCORES = {
 }
 
 
-def extract_flow_features(flow: dict) -> list[float]:
-    """
-    Extract feature vector from a flow dict.
+class FeatureExtractor:
+    """Stateful feature extractor to calculate moving averages."""
     
-    Features:
-    0. bytes_per_second
-    1. packets_per_second
-    2. byte_ratio (bytes / packets)
-    3. port_entropy
-    4. is_well_known_port (0 or 1)
-    5. geo_risk_score
-    6. dst_port (normalized)
-    7. protocol_tcp (0 or 1)
-    8. protocol_udp (0 or 1)
-    """
-    duration = max(flow.get("duration", 1), 0.001)
-    bytes_total = flow.get("bytes", 0)
-    packets = max(flow.get("packets", 1), 1)
-    dst_port = flow.get("dst_port", 0)
-    protocol = flow.get("protocol", "").upper()
-    country = flow.get("country", "")
-
-    return [
-        bytes_total / duration,                          # bytes/sec
-        packets / duration,                               # packets/sec
-        bytes_total / packets,                            # bytes/packet
-        _port_entropy(dst_port),                          # port entropy
-        1.0 if dst_port in WELL_KNOWN_PORTS else 0.0,    # known port
-        GEO_RISK_SCORES.get(country, 0.3),                # geo risk
-        min(dst_port / 65535.0, 1.0),                     # normalized port
-        1.0 if protocol == "TCP" else 0.0,                # is TCP
-        1.0 if protocol == "UDP" else 0.0,                # is UDP
-    ]
-
-
-def _port_entropy(port: int) -> float:
-    """Calculate a simple entropy proxy for the port number."""
-    if port == 0:
-        return 0.0
-    # Higher entropy for unusual ports
-    if port < 1024:
-        return 0.2
-    elif port < 10000:
-        return 0.5
-    else:
+    def __init__(self):
+        self.ip_connection_count = {}
+        self.ip_ports_seen = {}
+        self.last_cleanup = time.time()
+        
+    def _cleanup_state(self):
+        now = time.time()
+        if now - self.last_cleanup > 300: # 5 mins cleanup
+            self.ip_connection_count.clear()
+            self.ip_ports_seen.clear()
+            self.last_cleanup = now
+            
+    def _port_entropy(self, port: int) -> float:
+        if port == 0:
+            return 0.0
+        if port < 1024:
+            return 0.2
+        elif port < 10000:
+            return 0.5
         return 0.8
+
+    def extract(self, flow: dict) -> np.ndarray:
+        self._cleanup_state()
+        
+        src_ip = flow.get("src_ip", "0.0.0.0")
+        dst_port = flow.get("dst_port", 0)
+        
+        self.ip_connection_count[src_ip] = self.ip_connection_count.get(src_ip, 0) + 1
+        if src_ip not in self.ip_ports_seen:
+            self.ip_ports_seen[src_ip] = set()
+        self.ip_ports_seen[src_ip].add(dst_port)
+        
+        duration = max(flow.get("duration", 1.0), 0.001)
+        bytes_total = flow.get("bytes", 0)
+        packets = max(flow.get("packets", 1), 1)
+        protocol = flow.get("protocol", "").upper()
+        country = flow.get("country", "")
+
+        conn_per_min = self.ip_connection_count[src_ip]
+        unique_ports = len(self.ip_ports_seen[src_ip])
+
+        vector = [
+            bytes_total / duration,
+            packets / duration,
+            bytes_total / packets,
+            self._port_entropy(dst_port),
+            1.0 if dst_port in WELL_KNOWN_PORTS else 0.0,
+            GEO_RISK_SCORES.get(country, 0.3),
+            min(dst_port / 65535.0, 1.0),
+            1.0 if protocol == "TCP" else 0.0,
+            1.0 if protocol == "UDP" else 0.0,
+            conn_per_min,
+            unique_ports,
+        ]
+        return np.array([vector])

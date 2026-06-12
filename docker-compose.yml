@@ -8,7 +8,7 @@ services:
   nats:
     image: nats:2.10-alpine
     container_name: netwatch-nats
-    command: ["--jetstream", "--store_dir=/data"]
+    command: ["--jetstream", "--store_dir=/data", "-m", "8222"]
     volumes:
       - nats-data:/data
     ports:
@@ -17,7 +17,7 @@ services:
     mem_limit: 64m
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "nats-server", "--signal", "ldm"]
+      test: ["CMD", "wget", "-qO-", "http://localhost:8222/healthz"]
       interval: 30s
       timeout: 5s
       retries: 3
