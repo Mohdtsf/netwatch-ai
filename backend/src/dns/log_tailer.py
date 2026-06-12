@@ -11,7 +11,7 @@ from datetime import datetime
 
 logger = logging.getLogger("netwatch.dns.tailer")
 
-LOG_FILE = "/app/coredns/dns-queries.log"
+LOG_FILE = os.environ.get("COREDNS_LOG_FILE", "data/coredns/dns-queries.log")
 
 async def tail_dns_logs():
     """

@@ -20,6 +20,33 @@ live_traffic_clients: Set[WebSocket] = set()
 alert_clients: Set[WebSocket] = set()
 device_clients: Set[WebSocket] = set()
 dns_clients: Set[WebSocket] = set()
+stream_clients: Set[WebSocket] = set()
+
+
+@router.websocket("/ws/stream")
+async def ws_stream(websocket: WebSocket):
+    """
+    Combined real-time stream for all events (flows, alerts, etc.)
+    """
+    await websocket.accept()
+    stream_clients.add(websocket)
+    logger.info(f"WebSocket /ws/stream connected — {len(stream_clients)} clients")
+
+    try:
+        while True:
+            await asyncio.sleep(30)
+            await websocket.send_json({
+                "type": "heartbeat",
+                "timestamp": int(datetime.now(timezone.utc).timestamp()),
+                "message": "Combined WebSocket alive",
+            })
+    except WebSocketDisconnect:
+        stream_clients.discard(websocket)
+        logger.info(f"WebSocket /ws/stream disconnected — {len(stream_clients)} clients")
+    except Exception as e:
+        stream_clients.discard(websocket)
+        logger.error(f"WebSocket /ws/stream error: {e}")
+
 
 
 @router.websocket("/ws/live")
@@ -78,7 +105,7 @@ async def ws_alerts(websocket: WebSocket):
 
 async def broadcast_traffic(data: dict):
     """Broadcast traffic data to all connected live traffic clients."""
-    if not live_traffic_clients:
+    if not live_traffic_clients and not stream_clients:
         return
     message = json.dumps(data)
     disconnected = set()
@@ -90,10 +117,21 @@ async def broadcast_traffic(data: dict):
     if disconnected:
         live_traffic_clients.difference_update(disconnected)
 
+    if stream_clients:
+        stream_msg = json.dumps({"type": "flow", "data": data})
+        stream_disconnected = set()
+        for ws in stream_clients:
+            try:
+                await ws.send_text(stream_msg)
+            except Exception:
+                stream_disconnected.add(ws)
+        if stream_disconnected:
+            stream_clients.difference_update(stream_disconnected)
+
 
 async def broadcast_alert(data: dict):
     """Broadcast alert data to all connected alert clients."""
-    if not alert_clients:
+    if not alert_clients and not stream_clients:
         return
     message = json.dumps(data)
     disconnected = set()
@@ -104,6 +142,17 @@ async def broadcast_alert(data: dict):
             disconnected.add(ws)
     if disconnected:
         alert_clients.difference_update(disconnected)
+
+    if stream_clients:
+        stream_msg = json.dumps({"type": "alert", "data": data})
+        stream_disconnected = set()
+        for ws in stream_clients:
+            try:
+                await ws.send_text(stream_msg)
+            except Exception:
+                stream_disconnected.add(ws)
+        if stream_disconnected:
+            stream_clients.difference_update(stream_disconnected)
 
 @router.websocket("/ws/devices")
 async def ws_devices(websocket: WebSocket):

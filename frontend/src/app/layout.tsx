@@ -1,26 +1,22 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import ClientLayout from "./client-layout";
 
 export const metadata: Metadata = {
-  title: "NetWatch AI — Network Security Dashboard",
-  description:
-    "Self-hosted network security platform with live traffic monitoring, DNS firewall, device tracking, WireGuard VPN, and AI anomaly detection.",
+  title: "NetWatch AI",
+  description: "Real-time network security platform",
 };
 
 export default function RootLayout({
   children,
-}: {
+}: Readonly<{
   children: React.ReactNode;
-}) {
+}>) {
   return (
-    <html lang="en" className="dark">
-      <head>
-        <link
-          href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
-          rel="stylesheet"
-        />
-      </head>
-      <body>{children}</body>
+    <html lang="en">
+      <body className="antialiased bg-background text-foreground flex h-screen overflow-hidden">
+        <ClientLayout>{children}</ClientLayout>
+      </body>
     </html>
   );
 }

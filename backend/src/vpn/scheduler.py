@@ -33,5 +33,7 @@ async def poll_vpn_status():
                         peer.endpoint = info["endpoint"]
             
             await db.commit()
+    except FileNotFoundError:
+        logger.debug("WireGuard (wg) not found. Skipping VPN status poll.")
     except Exception as e:
         logger.error(f"Error polling VPN status: {e}")
