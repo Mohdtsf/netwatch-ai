@@ -48,6 +48,7 @@ class Settings(BaseSettings):
     WG_SERVER_PORT: int = 51820
     WG_SERVER_ADDRESS: str = "10.8.0.1/24"
     WG_ENDPOINT: str = "auto"
+    VPN_ENCRYPTION_KEY: str = "xOq1e2M4EwOQK8p9dE_v4I8sPz3N5wVv5yM4D6K9R1w=" # 32-byte url-safe base64
 
     # ── ML ────────────────────────────────────
     ML_ENABLED: bool = True

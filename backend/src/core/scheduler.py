@@ -121,6 +121,16 @@ async def start_scheduler():
         replace_existing=True,
     )
 
+    # VPN status polling job (runs every minute)
+    from src.vpn.scheduler import poll_vpn_status
+    scheduler.add_job(
+        poll_vpn_status,
+        IntervalTrigger(minutes=1),
+        id="vpn_status_poll",
+        name="Poll WireGuard status",
+        replace_existing=True,
+    )
+
 
 async def stop_scheduler():
     """Gracefully stop the scheduler."""

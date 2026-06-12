@@ -57,8 +57,10 @@ services:
       - ./data:/app/data
       - ./backend/src:/app/src    # dev hot-reload
       - ./coredns:/app/coredns    # CoreDNS config access
+      - ./wireguard:/etc/wireguard
     ports:
       - "8000:8000"
+      - "51820:51820/udp"
     cap_add:
       - NET_ADMIN    # for nftables
     depends_on:

@@ -171,6 +171,7 @@ from src.alerts.router import router as alerts_router
 from src.core.websocket import router as ws_router
 from src.dns.router import router as dns_router
 from src.firewall.router import router as firewall_router
+from src.vpn.router import router as vpn_router
 
 app.include_router(auth_router)
 app.include_router(devices_router)
@@ -179,6 +180,7 @@ app.include_router(alerts_router)
 app.include_router(ws_router)
 app.include_router(dns_router)
 app.include_router(firewall_router)
+app.include_router(vpn_router)
 
 
 # ── Health Check ──────────────────────────────
