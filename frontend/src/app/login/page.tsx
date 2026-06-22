@@ -19,12 +19,9 @@ export default function LoginPage() {
     setIsLoading(true);
 
     try {
-      const formData = new FormData();
-      formData.append('username', username);
-      formData.append('password', password);
-
-      const response = await api.post('/auth/login', formData, {
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+      const response = await api.post('/auth/login', {
+        username,
+        password,
       });
       
       localStorage.setItem('access_token', response.data.access_token);

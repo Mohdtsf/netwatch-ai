@@ -21,6 +21,7 @@ dependencies = [
     # ── Utilities ──────────────────────────────
     "orjson>=3.10.0",
     "psutil>=6.1.0",
+    "yarl<2.0",
 ]
 
 [project.optional-dependencies]

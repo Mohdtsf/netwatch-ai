@@ -160,10 +160,10 @@ services:
       - BACKEND_URL=http://backend:8000
     volumes:
       - ./frontend/src:/app/src
-    mem_limit: 1g
+    mem_limit: 256m
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:3000"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000"]
       interval: 15s
       timeout: 5s
       retries: 3

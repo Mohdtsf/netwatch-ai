@@ -9,7 +9,6 @@ services:
   # Increase memory limits
   nats:
     mem_limit: 128m
-    command: ["--jetstream", "--store_dir=/data", "--max_mem_store=128MB"]
 
   redis:
     mem_limit: 128m
@@ -35,7 +34,7 @@ services:
       - MLFLOW_TRACKING=true
 
   coredns:
-    mem_limit: 128m
+    mem_limit: 512m
 
   nginx:
     mem_limit: 64m

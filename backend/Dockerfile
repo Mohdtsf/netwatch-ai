@@ -13,7 +13,7 @@ WORKDIR /app
 
 # Install Python dependencies
 COPY pyproject.toml .
-RUN pip install --no-cache-dir -e ".[dev]" 2>/dev/null || pip install --no-cache-dir .
+RUN pip install --no-cache-dir .
 
 # Copy source code
 COPY . .
@@ -28,5 +28,5 @@ EXPOSE 8000
 HEALTHCHECK --interval=15s --timeout=5s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-# Run with uvicorn
-CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--log-level", "info"]
+# Run with uvicorn in production mode (no reload)
+CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000", "--log-level", "info"]
