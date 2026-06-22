@@ -1,0 +1,571 @@
+#!/usr/bin/env bash
+# ══════════════════════════════════════════════
+# NetWatch AI — Unified Interactive Controller
+# ══════════════════════════════════════════════
+
+set -uo pipefail
+
+# ── Color Definitions ─────────────────────────
+CYAN='\033[0;36m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+NC='\033[0m' # No Color
+BOLD='\033[1m'
+DIM='\033[2m'
+
+# ── Global CLI Variables ──────────────────────
+DOCKER_CMD="docker"
+COMPOSE_CMD="docker compose"
+COMPOSE_ARGS=""
+PROFILE="standard"
+
+# ── Helper: Spinner ───────────────────────────
+run_with_spinner() {
+    local cmd="$1"
+    local msg="$2"
+    local log_file=".netwatch-setup.log"
+    
+    # Run command in background, redirect output to setup log
+    eval "$cmd" > "$log_file" 2>&1 &
+    local pid=$!
+    
+    local spin='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+    local i=0
+    
+    # Hide cursor
+    tput civis
+    
+    while kill -0 "$pid" 2>/dev/null; do
+        local frame="${spin:$i:1}"
+        local last_line=""
+        if [ -f "$log_file" ] && [ -s "$log_file" ]; then
+            last_line=$(tail -n 1 "$log_file" | tr -d '\r\n' | cut -c1-60)
+        fi
+        # Clean line and print spinner status
+        printf "\r\033[K%b %s %-35s %b(%s)%b" "${CYAN}${frame}${NC}" "${BOLD}" "${msg}..." "${YELLOW}" "${last_line}" "${NC}"
+        i=$(( (i+1) % 10 ))
+        sleep 0.1
+    done
+    
+    # Restore cursor
+    tput cnorm
+    
+    wait "$pid"
+    local exit_code=$?
+    
+    if [ $exit_code -ne 0 ]; then
+        printf "\r\033[K%b ✗ %s (Failed with code %d)%b\n" "${RED}" "${msg}" "$exit_code" "${NC}"
+        echo -e "${RED}Error log output (last 15 lines):${NC}"
+        tail -n 15 "$log_file"
+        echo -e "${YELLOW}Please inspect $log_file for the full log detail.${NC}"
+        return $exit_code
+    else
+        printf "\r\033[K%b ✓ %s successful!%b\n" "${GREEN}" "${msg}" "${NC}"
+        return 0
+    fi
+}
+
+# ── Helper: Cleanup/Shutdown Trap ─────────────
+cleanup() {
+    echo -e "\n\n${YELLOW}Stopping NetWatch services...${NC}"
+    # Reset traps to avoid circular references
+    trap - INT TERM EXIT
+    
+    # Stop containers with spinner
+    run_with_spinner "$COMPOSE_CMD $COMPOSE_ARGS down" "Shutting down NetWatch containers"
+    
+    echo -e "${GREEN}✓ NetWatch has been stopped cleanly.${NC}"
+    exit 0
+}
+
+# ── Installer: Docker & Dependencies ──────────
+check_docker() {
+    if ! command -v docker &>/dev/null; then
+        echo -e "${YELLOW}🐳 Docker is not installed on this system.${NC}"
+        read -p "Would you like to install Docker automatically now? [Y/n]: " install_choice
+        install_choice=${install_choice:-y}
+        if [[ "$install_choice" =~ ^[Yy]$ ]]; then
+            echo -e "${CYAN}Installing Docker...${NC}"
+            if command -v curl &>/dev/null; then
+                curl -fsSL https://get.docker.com -o get-docker.sh
+                sudo sh get-docker.sh
+                rm get-docker.sh
+            elif command -v wget &>/dev/null; then
+                wget -qO get-docker.sh https://get.docker.com
+                sudo sh get-docker.sh
+                rm get-docker.sh
+            else
+                echo -e "${RED}Error: Neither curl nor wget is installed. Please install one first.${NC}"
+                exit 1
+            fi
+            
+            # Start and enable docker service
+            sudo systemctl enable --now docker || true
+            sudo usermod -aG docker "$USER" || true
+            echo -e "${GREEN}✓ Docker installed successfully.${NC}"
+            echo -e "${YELLOW}NOTE: Added user to the 'docker' group. Sudo might still be required for this session.${NC}"
+        else
+            echo -e "${RED}Error: Docker is required to run NetWatch. Exiting.${NC}"
+            exit 1
+        fi
+    fi
+
+    # Check for docker compose support (either as subcommand or standalone v1)
+    if ! docker compose version &>/dev/null; then
+        echo -e "${YELLOW}🐳 Docker Compose v2 is not installed.${NC}"
+        read -p "Would you like to install the Docker Compose plugin automatically now? [Y/n]: " install_choice
+        install_choice=${install_choice:-y}
+        if [[ "$install_choice" =~ ^[Yy]$ ]]; then
+            echo -e "${CYAN}Installing docker-compose-plugin...${NC}"
+            if command -v apt-get &>/dev/null; then
+                sudo apt-get update && sudo apt-get install -y docker-compose-plugin
+            elif command -v dnf &>/dev/null; then
+                sudo dnf install -y docker-compose-plugin
+            elif command -v yum &>/dev/null; then
+                sudo yum install -y docker-compose-plugin
+            elif command -v pacman &>/dev/null; then
+                sudo pacman -Sy --noconfirm docker-compose
+            else
+                echo -e "${RED}Could not auto-detect package manager to install Docker Compose plugin.${NC}"
+                echo -e "Please install it manually: https://docs.docker.com/compose/install/"
+                exit 1
+            fi
+            echo -e "${GREEN}✓ Docker Compose plugin installed successfully.${NC}"
+        else
+            echo -e "${RED}Error: Docker Compose v2 is required to run NetWatch. Exiting.${NC}"
+            exit 1
+        fi
+    fi
+}
+
+setup_docker_command() {
+    if docker info &>/dev/null; then
+        DOCKER_CMD="docker"
+    elif sudo docker info &>/dev/null; then
+        DOCKER_CMD="sudo docker"
+    else
+        echo -e "${RED}Error: Docker daemon is not running or current user does not have permission.${NC}"
+        echo -e "Try starting it: sudo systemctl start docker"
+        exit 1
+    fi
+    COMPOSE_CMD="$DOCKER_CMD compose"
+}
+
+# ── Config Wizard ─────────────────────────────
+config_wizard() {
+    echo -e "${CYAN}╔══════════════════════════════════════════╗${NC}"
+    echo -e "${CYAN}║     NetWatch AI — Configuration Wizard   ║${NC}"
+    echo -e "${CYAN}╚══════════════════════════════════════════╝${NC}\n"
+    
+    echo -e "Initializing environment variables from .env.example..."
+    cp .env.example .env
+    
+    # 1. Profile selection
+    echo -e "\n${BOLD}📊 Select Resource Profile:${NC}"
+    echo -e "  1) minimal  — 512 MB RAM, no ML (Raspberry Pi 3, older laptops)"
+    echo -e "  2) standard — 600 MB RAM, full features (default)"
+    echo -e "  3) full     — 1.2 GB RAM, MLflow tracking (dedicated servers)"
+    echo ""
+    read -p "Choose profile [2]: " PROFILE_CHOICE
+    PROFILE_CHOICE=${PROFILE_CHOICE:-2}
+    
+    case $PROFILE_CHOICE in
+        1) PROFILE="minimal" ;;
+        3) PROFILE="full" ;;
+        *) PROFILE="standard" ;;
+    esac
+    
+    sed -i "s/NETWATCH_PROFILE=standard/NETWATCH_PROFILE=$PROFILE/" .env
+    echo -e "${GREEN}✓ Profile set to: $PROFILE${NC}"
+    
+    # 2. Admin password setup (custom/secure input)
+    echo -e "\n${BOLD}🔐 Admin Password Setup:${NC}"
+    echo -e "  1) Input your own custom password"
+    echo -e "  2) Auto-generate a secure random password"
+    echo ""
+    read -p "Choose option [1]: " PASS_OPTION
+    PASS_OPTION=${PASS_OPTION:-1}
+    
+    local ADMIN_PASSWORD=""
+    if [ "$PASS_OPTION" = "1" ]; then
+        while true; do
+            # Read passwords securely (keystrokes hidden)
+            read -s -p "Enter admin password: " PASS1
+            echo ""
+            read -s -p "Confirm admin password: " PASS2
+            echo ""
+            
+            if [ -z "$PASS1" ]; then
+                echo -e "${RED}Error: Password cannot be empty. Please try again.${NC}"
+            elif [ "$PASS1" != "$PASS2" ]; then
+                echo -e "${RED}Error: Passwords do not match. Please try again.${NC}"
+            else
+                ADMIN_PASSWORD="$PASS1"
+                break
+            fi
+        done
+    else
+        ADMIN_PASSWORD=$(python3 -c "import secrets; print(secrets.token_urlsafe(12))" 2>/dev/null || openssl rand -base64 12 || echo "NetWatchAdminSecure123")
+        echo -e "${GREEN}✓ Generated secure password:${NC} ${BOLD}${ADMIN_PASSWORD}${NC}"
+    fi
+    
+    # Save password to .env
+    sed -i "s/ADMIN_PASSWORD=CHANGE_ME_USE_A_STRONG_PASSWORD/ADMIN_PASSWORD=$ADMIN_PASSWORD/" .env
+    
+    # 3. Detect interface and subnet
+    echo -e "\n${BOLD}🔍 Network Configuration:${NC}"
+    local DEFAULT_IF
+    DEFAULT_IF=$(ip route show default 2>/dev/null | awk '{print $5}' | head -1 || true)
+    if [ -n "$DEFAULT_IF" ]; then
+        echo -e "  Detected interface: ${CYAN}$DEFAULT_IF${NC}"
+        sed -i "s/CAPTURE_INTERFACE=eth0/CAPTURE_INTERFACE=$DEFAULT_IF/" .env
+        
+        local DEFAULT_SUBNET
+        DEFAULT_SUBNET=$(ip -4 addr show "$DEFAULT_IF" 2>/dev/null | awk '/inet / {print $2}' | head -1 || true)
+        if [ -n "$DEFAULT_SUBNET" ]; then
+            local NETWORK
+            NETWORK=$(echo "$DEFAULT_SUBNET" | sed 's/\.[0-9]*\//.0\//')
+            echo -e "  Detected subnet:    ${CYAN}$NETWORK${NC}"
+            sed -i "s|SCAN_SUBNET=192.168.1.0/24|SCAN_SUBNET=$NETWORK|" .env
+        fi
+    else
+        echo -e "${YELLOW}  No active internet network interface detected. Defaulting to eth0.${NC}"
+    fi
+    
+    # 4. Generate crypto/app secrets
+    local JWT_SECRET
+    JWT_SECRET=$(python3 -c "import secrets; print(secrets.token_hex(32))" 2>/dev/null || openssl rand -hex 32 || echo "default_jwt_secret_key_netwatch_ai_token_32_bytes")
+    sed -i "s/JWT_SECRET_KEY=CHANGE_ME_GENERATE_A_RANDOM_64_CHAR_HEX_STRING/JWT_SECRET_KEY=$JWT_SECRET/" .env
+    
+    local VPN_KEY
+    VPN_KEY=$(python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())" 2>/dev/null || python3 -c "import base64, os; print(base64.b64encode(os.urandom(32)).decode())" 2>/dev/null || echo "g1k2j3h4l5k6j7h8g9f8e7d6c5b4a3s2d1f2g3h4j5k=")
+    sed -i "s/VPN_ENCRYPTION_KEY=CHANGE_ME_GENERATE_A_32_BYTE_BASE64_KEY_WITH_FERNET/VPN_ENCRYPTION_KEY=$VPN_KEY/" .env
+    
+    # Build data models directory
+    mkdir -p data/ml-models
+    
+    echo -e "\n${GREEN}✓ Configuration saved successfully to .env!${NC}"
+    echo -e "----------------------------------------"
+    echo -e "Admin Login Credentials:"
+    echo -e "  Username: ${BOLD}admin${NC}"
+    echo -e "  Password: ${BOLD}${ADMIN_PASSWORD}${NC}"
+    echo -e "----------------------------------------"
+    echo -e "${YELLOW}Save these credentials! You will need them to login.${NC}\n"
+    
+    read -n 1 -s -r -p "Press any key to start NetWatch..."
+    echo ""
+}
+
+# ── Load Configuration ────────────────────────
+load_config() {
+    if [ -f .env ]; then
+        PROFILE=$(grep "^NETWATCH_PROFILE=" .env | cut -d'=' -f2 | tr -d '\r\n')
+        PROFILE=${PROFILE:-standard}
+    else
+        config_wizard
+        PROFILE=$(grep "^NETWATCH_PROFILE=" .env | cut -d'=' -f2 | tr -d '\r\n')
+        PROFILE=${PROFILE:-standard}
+    fi
+    
+    COMPOSE_ARGS=""
+    if [ "$PROFILE" = "minimal" ]; then
+        COMPOSE_ARGS="-f docker-compose.yml -f docker-compose.minimal.yml"
+    elif [ "$PROFILE" = "full" ]; then
+        COMPOSE_ARGS="-f docker-compose.yml -f docker-compose.full.yml"
+    else
+        COMPOSE_ARGS=""
+    fi
+}
+
+# ── Dashboard & Status Monitoring ─────────────
+get_active_services() {
+    if [ "$PROFILE" = "minimal" ]; then
+        echo "nats redis backend capture-agent coredns frontend nginx"
+    elif [ "$PROFILE" = "full" ]; then
+        echo "nats redis backend capture-agent ml-engine coredns frontend nginx mlflow"
+    else
+        echo "nats redis backend capture-agent ml-engine coredns frontend nginx"
+    fi
+}
+
+get_status_from_output() {
+    local svc="$1"
+    local ps_out="$2"
+    local line
+    line=$(echo "$ps_out" | grep -i "^${svc}:" | head -n 1 || true)
+    
+    if [ -z "$line" ]; then
+        echo -e "${RED}● OFFLINE${NC}"
+        return
+    fi
+    
+    local state
+    state=$(echo "$line" | cut -d':' -f2)
+    local health
+    health=$(echo "$line" | cut -d':' -f3 || true)
+    
+    if [[ "$health" == "healthy" ]]; then
+        echo -e "${GREEN}● RUNNING (HEALTHY)${NC}"
+    elif [[ "$health" == "unhealthy" ]]; then
+        echo -e "${RED}● UNHEALTHY${NC}"
+    elif [[ "$state" == "running" || "$state" == "Up" || "$state" == "up" ]]; then
+        echo -e "${GREEN}● RUNNING${NC}"
+    elif [[ -n "$state" ]]; then
+        echo -e "${YELLOW}● ${state^^}${NC}"
+    else
+        echo -e "${RED}● OFFLINE${NC}"
+    fi
+}
+
+diagnose_health() {
+    clear
+    echo -e "${CYAN}╔══════════════════════════════════════════╗${NC}"
+    echo -e "${CYAN}║         NetWatch Health Diagnosis        ║${NC}"
+    echo -e "${CYAN}╚══════════════════════════════════════════╝${NC}\n"
+    
+    echo -n "Checking Backend API... "
+    if curl -sf http://localhost:8000/health &>/dev/null; then
+        echo -e "${GREEN}OK${NC}"
+    else
+        echo -e "${RED}FAILED${NC} (No response from http://localhost:8000/health)"
+    fi
+    
+    if [ "$PROFILE" != "minimal" ]; then
+        echo -n "Checking ML Engine... "
+        if curl -sf http://localhost:8001/health &>/dev/null; then
+            echo -e "${GREEN}OK${NC}"
+        else
+            echo -e "${RED}FAILED${NC} (No response from http://localhost:8001/health)"
+        fi
+    fi
+    
+    echo -n "Checking Next.js Frontend... "
+    if curl -sf http://localhost:3000 &>/dev/null; then
+        echo -e "${GREEN}OK${NC}"
+    else
+        echo -e "${RED}FAILED${NC} (No response from http://localhost:3000)"
+    fi
+    
+    echo -n "Checking DNS Server (CoreDNS)... "
+    local coredns_status
+    coredns_status=$($COMPOSE_CMD $COMPOSE_ARGS ps coredns --format "{{.Health}}" 2>/dev/null || true)
+    if [[ "$coredns_status" == "healthy" ]]; then
+        echo -e "${GREEN}OK${NC} (Container healthy)"
+    else
+        echo -e "${RED}FAILED${NC} (Health status: ${coredns_status:-unknown})"
+    fi
+    
+    echo ""
+    read -n 1 -s -r -p "Press any key to return to dashboard..."
+    echo ""
+}
+
+show_logs() {
+    echo -e "${YELLOW}Tailing logs. Press Ctrl+C to return to dashboard...${NC}\n"
+    # Unbind trap to let user interrupt logs cleanly
+    trap - INT
+    $COMPOSE_CMD $COMPOSE_ARGS logs -f --tail=50 || true
+    # Restore trap
+    trap cleanup INT TERM
+}
+
+# ── Service Management Commands ────────────────
+start_services() {
+    local running_count
+    running_count=$($COMPOSE_CMD $COMPOSE_ARGS ps | grep -c -E "Up|running" || true)
+    if [ "$running_count" -gt 0 ]; then
+        echo -e "${GREEN}✓ NetWatch services are already running.${NC}"
+        return
+    fi
+    
+    echo -e "${CYAN}Starting NetWatch containers silently (hiding output)...${NC}"
+    run_with_spinner "$COMPOSE_CMD $COMPOSE_ARGS up -d" "Starting NetWatch containers"
+}
+
+stop_services() {
+    run_with_spinner "$COMPOSE_CMD $COMPOSE_ARGS down" "Shutting down NetWatch containers"
+}
+
+restart_services() {
+    run_with_spinner "$COMPOSE_CMD $COMPOSE_ARGS restart" "Restarting NetWatch containers"
+}
+
+status_services() {
+    echo -e "${CYAN}NetWatch Container Status:${NC}"
+    $COMPOSE_CMD $COMPOSE_ARGS ps
+}
+
+# ── Interactive TUI Dashboard ─────────────────
+launch_dashboard() {
+    trap cleanup INT TERM
+    
+    # Hide cursor
+    tput civis
+    
+    # Save old terminal settings
+    local old_tty_settings
+    old_tty_settings=$(stty -g)
+    
+    # Initial clear screen
+    clear
+    
+    while true; do
+        # 1. Get status from Docker Compose FIRST (takes ~0.5 - 1.5s, previous screen stays visible)
+        local PS_OUTPUT
+        PS_OUTPUT=$($COMPOSE_CMD $COMPOSE_ARGS ps --format "{{.Service}}:{{.State}}:{{.Health}}" 2>/dev/null || $COMPOSE_CMD $COMPOSE_ARGS ps --format "{{.Service}}:{{.State}}" 2>/dev/null || true)
+        
+        # 2. Move cursor to top-left (home position) instead of using 'clear'
+        printf "\033[H"
+        
+        # 3. Render dashboard frame (clearing to end of line with \033[K to prevent visual garbage)
+        echo -e "${CYAN}╔══════════════════════════════════════════════════════════════════════╗${NC}\033[K"
+        echo -e "${CYAN}║                        N E T W A T C H   A I                         ║${NC}\033[K"
+        echo -e "${CYAN}║                 Enterprise Self-Hosted Network Security             ║${NC}\033[K"
+        echo -e "${CYAN}╚══════════════════════════════════════════════════════════════════════╝${NC}\033[K"
+        echo -e "\033[K"
+        echo -e "  ${BOLD}Status:${NC} ${GREEN}RUNNING${NC}           ${BOLD}Profile:${NC} ${YELLOW}$PROFILE${NC}\033[K"
+        echo -e "\033[K"
+        echo -e "  ${BOLD}Services Status:${NC}\033[K"
+        
+        for svc in $(get_active_services); do
+            local friendly_name
+            case $svc in
+                nats) friendly_name="Message Broker (NATS)" ;;
+                redis) friendly_name="Cache/Session (Redis)" ;;
+                backend) friendly_name="FastAPI Backend" ;;
+                capture-agent) friendly_name="Packet Capture Agent" ;;
+                ml-engine) friendly_name="ML Inference Engine" ;;
+                coredns) friendly_name="DNS Firewall (CoreDNS)" ;;
+                frontend) friendly_name="Next.js Dashboard" ;;
+                nginx) friendly_name="Reverse Proxy (Nginx)" ;;
+                mlflow) friendly_name="MLflow Tracking Server" ;;
+                *) friendly_name="$svc" ;;
+            esac
+            
+            local svc_status
+            svc_status=$(get_status_from_output "$svc" "$PS_OUTPUT")
+            printf "    %-30s %b\033[K\n" "$friendly_name" "$svc_status"
+        done
+        
+        echo -e "\033[K"
+        echo -e "  ${BOLD}Access URLs:${NC}\033[K"
+        echo -e "    ● Dashboard:  ${CYAN}http://localhost:3000${NC}\033[K"
+        echo -e "    ● API Docs:   ${CYAN}http://localhost:8000/docs${NC}\033[K"
+        echo -e "    ● Proxy Port: ${CYAN}http://localhost:80${NC} (via Nginx)\033[K"
+        echo -e "\033[K"
+        echo -e "  ${DIM}──────────────────────────────────────────────────────────────────────${NC}\033[K"
+        echo -e "  ${BOLD}[s]${NC} Stop & Exit    ${BOLD}[r]${NC} Restart    ${BOLD}[l]${NC} Tail Logs    ${BOLD}[h]${NC} Health Check    ${BOLD}[q]${NC} Exit Monitor\033[K"
+        echo -e "  ${DIM}──────────────────────────────────────────────────────────────────────${NC}\033[K"
+        
+        # Clear any remaining lines below the menu (e.g. if profile changed or terminal resized)
+        printf "\033[J"
+        
+        # Non-blocking read (timeout 2s)
+        stty raw -echo
+        local char=""
+        if read -t 2 -n 1 read_char; then
+            char="$read_char"
+        fi
+        stty "$old_tty_settings"
+        
+        case "$char" in
+            [sS])
+                cleanup
+                ;;
+            [rR])
+                stty "$old_tty_settings"
+                tput cnorm
+                restart_services
+                clear
+                tput civis
+                ;;
+            [lL])
+                stty "$old_tty_settings"
+                tput cnorm
+                clear
+                show_logs
+                clear
+                tput civis
+                ;;
+            [hH])
+                stty "$old_tty_settings"
+                tput cnorm
+                diagnose_health
+                clear
+                tput civis
+                ;;
+            [qQ])
+                stty "$old_tty_settings"
+                tput cnorm
+                echo -e "\n${GREEN}Exited monitoring dashboard. NetWatch is still running in background.${NC}"
+                exit 0
+                ;;
+        esac
+    done
+    
+    stty "$old_tty_settings"
+    tput cnorm
+}
+
+# ── Help / Usage ──────────────────────────────
+show_help() {
+    echo -e "${CYAN}NetWatch AI Unified CLI Manager${NC}"
+    echo -e "Usage: ./netwatch [command]\n"
+    echo -e "Commands:"
+    echo -e "  ${BOLD}(none)${NC}      Check installation, configure and start interactive dashboard"
+    echo -e "  ${BOLD}start${NC}       Start NetWatch services and enter dashboard"
+    echo -e "  ${BOLD}stop${NC}        Stop and remove all NetWatch service containers"
+    echo -e "  ${BOLD}restart${NC}     Restart all NetWatch services"
+    echo -e "  ${BOLD}status${NC}      Show docker container running status"
+    echo -e "  ${BOLD}logs${NC}        Tail logs from all services"
+    echo -e "  ${BOLD}install${NC}     Force re-run environment configuration wizard"
+    echo -e "  ${BOLD}help${NC}        Display this guide"
+}
+
+# ── CLI Entry Point ───────────────────────────
+case "${1:-}" in
+    start)
+        check_docker
+        setup_docker_command
+        load_config
+        start_services
+        launch_dashboard
+        ;;
+    stop)
+        setup_docker_command
+        load_config
+        stop_services
+        ;;
+    restart)
+        setup_docker_command
+        load_config
+        restart_services
+        ;;
+    status)
+        setup_docker_command
+        load_config
+        status_services
+        ;;
+    logs)
+        setup_docker_command
+        load_config
+        tail_logs
+        ;;
+    install|configure)
+        check_docker
+        setup_docker_command
+        config_wizard
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        # Default run behavior
+        check_docker
+        setup_docker_command
+        load_config
+        start_services
+        launch_dashboard
+        ;;
+esac

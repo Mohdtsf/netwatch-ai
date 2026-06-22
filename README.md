@@ -22,18 +22,20 @@
 
 ## Quick Start
 
+### One-Command Setup & Run
+Run the following command in your terminal to automatically pull, install, configure, and start NetWatch with a clean, interactive dashboard:
 ```bash
-# Clone
-git clone https://github.com/yourusername/netwatch.git
+curl -fsSL https://raw.githubusercontent.com/Mohdtsf/netwatch-ai/main/scripts/bootstrap.sh | bash
+```
+
+### Local Setup
+Alternatively, if you already have the repository cloned:
+```bash
+# Enter project directory
 cd netwatch
 
-# Install (auto-detects network interface and generates secrets)
-bash scripts/install.sh
-
-# Or manually
-cp .env.example .env
-# Edit .env — set admin password and network interface
-make up
+# Run the interactive manager (auto-installs Docker and configures settings if missing)
+./netwatch
 ```
 
 **Dashboard:** http://localhost:3000  
