@@ -1,35 +1,71 @@
 """
 NetWatch AI — VPN Service
 Generates WireGuard configuration and manages peers.
+Falls back gracefully when WireGuard CLI/interface is unavailable (dev mode).
 """
 
 import os
 import base64
-import qrcode
+import logging
 import subprocess
 from io import BytesIO
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
+try:
+    import qrcode
+    QR_AVAILABLE = True
+except ImportError:
+    QR_AVAILABLE = False
+
 from src.core.models import VpnPeer, Device
 from src.core.config import settings
-from src.vpn.manager import decrypt_key, sync_wireguard_config, generate_keys, encrypt_key
+from src.vpn.manager import decrypt_key, sync_wireguard_config, generate_keys, encrypt_key, WG_CLI_AVAILABLE
+
+logger = logging.getLogger("netwatch.vpn.service")
 
 WG_CONF_PATH = "/etc/wireguard/wg0.conf"
+
+# Use a local fallback path for dev environments without /etc/wireguard access
+_DATA_DIR = os.environ.get("WG_DATA_DIR", os.path.join(os.path.dirname(__file__), "..", "..", "data", "wireguard"))
+_SERVER_KEY_PATH = os.path.join(_DATA_DIR, "server_private.key")
+
+def _ensure_server_key() -> str:
+    """Ensure a server private key exists. Returns the private key string."""
+    # Try the canonical /etc/wireguard path first (Docker/production)
+    etc_key_path = "/etc/wireguard/server_private.key"
+    if os.path.exists(etc_key_path):
+        with open(etc_key_path, "r") as f:
+            return f.read().strip()
+    
+    # Fall back to local data directory (development)
+    if os.path.exists(_SERVER_KEY_PATH):
+        with open(_SERVER_KEY_PATH, "r") as f:
+            return f.read().strip()
+    
+    # Generate new server key
+    priv_key, _, _ = generate_keys()
+    
+    # Try to write to /etc/wireguard first, then fallback
+    for path in [etc_key_path, _SERVER_KEY_PATH]:
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w") as f:
+                f.write(priv_key)
+            logger.info(f"Server private key generated and saved to {path}")
+            return priv_key
+        except (PermissionError, OSError):
+            continue
+    
+    # If we can't write anywhere, just return the key in memory
+    logger.warning("Could not persist server private key to disk")
+    return priv_key
+
 
 async def generate_server_config(db: AsyncSession) -> str:
     """Generate the full wg0.conf server configuration string."""
     
-    # Server config section
-    server_priv_key_path = "/etc/wireguard/server_private.key"
-    if not os.path.exists(server_priv_key_path):
-        os.makedirs(os.path.dirname(server_priv_key_path), exist_ok=True)
-        priv_proc = subprocess.run(["wg", "genkey"], capture_output=True, text=True, check=True)
-        with open(server_priv_key_path, "w") as f:
-            f.write(priv_proc.stdout.strip())
-            
-    with open(server_priv_key_path, "r") as f:
-        server_private_key = f.read().strip()
+    server_private_key = _ensure_server_key()
         
     config = [
         "[Interface]",
@@ -60,14 +96,29 @@ async def generate_server_config(db: AsyncSession) -> str:
     return "\n".join(config)
 
 async def apply_server_config(db: AsyncSession):
-    """Write config to disk and sync with interface."""
-    config_str = await generate_server_config(db)
+    """Write config to disk and sync with interface. Skips gracefully in dev mode."""
+    try:
+        config_str = await generate_server_config(db)
+    except Exception as e:
+        logger.warning(f"Could not generate server config: {e}")
+        return
     
-    os.makedirs(os.path.dirname(WG_CONF_PATH), exist_ok=True)
-    with open(WG_CONF_PATH, "w") as f:
-        f.write(config_str)
-        
-    sync_wireguard_config(WG_CONF_PATH)
+    # Try to write the config file
+    for path in [WG_CONF_PATH, os.path.join(_DATA_DIR, "wg0.conf")]:
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w") as f:
+                f.write(config_str)
+            logger.info(f"WireGuard config written to {path}")
+            break
+        except (PermissionError, OSError):
+            continue
+    
+    # Sync the running interface (will skip if wg CLI unavailable)
+    try:
+        sync_wireguard_config(WG_CONF_PATH)
+    except Exception as e:
+        logger.warning(f"Could not sync WireGuard config (dev mode): {e}")
 
 def generate_client_config(peer: VpnPeer, server_public_key: str) -> str:
     """Generate the client .conf string for a peer."""
@@ -96,7 +147,12 @@ def generate_client_config(peer: VpnPeer, server_public_key: str) -> str:
         
     endpoint = settings.WG_ENDPOINT
     if endpoint == "auto":
-        endpoint = "<SERVER_PUBLIC_IP>"
+        try:
+            import urllib.request
+            with urllib.request.urlopen("https://api.ipify.org", timeout=2) as response:
+                endpoint = response.read().decode('utf-8').strip()
+        except Exception:
+            endpoint = "127.0.0.1"
         
     config.append(f"Endpoint = {endpoint}:{settings.WG_SERVER_PORT}")
     config.append(f"AllowedIPs = {allowed_ips}")
@@ -106,6 +162,10 @@ def generate_client_config(peer: VpnPeer, server_public_key: str) -> str:
 
 def generate_qr_code(config_str: str) -> str:
     """Generate a base64 encoded PNG QR code for the given config."""
+    if not QR_AVAILABLE:
+        logger.warning("qrcode library not installed, returning placeholder")
+        return ""
+    
     qr = qrcode.QRCode(
         version=1,
         error_correction=qrcode.constants.ERROR_CORRECT_L,
@@ -119,18 +179,32 @@ def generate_qr_code(config_str: str) -> str:
     buffered = BytesIO()
     img.save(buffered, format="PNG")
     img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
-    return f"data:image/png;base64,{img_str}"
+    return img_str
 
 async def get_server_public_key() -> str:
     """Retrieve the server's public key."""
-    server_priv_key_path = "/etc/wireguard/server_private.key"
-    if not os.path.exists(server_priv_key_path):
+    server_private_key = _ensure_server_key()
+    if not server_private_key:
         return ""
-    with open(server_priv_key_path, "r") as f:
-        priv_key = f.read().strip()
-        
-    proc = subprocess.run(["wg", "pubkey"], input=priv_key, capture_output=True, text=True, check=True)
-    return proc.stdout.strip()
+    
+    if WG_CLI_AVAILABLE:
+        try:
+            proc = subprocess.run(["wg", "pubkey"], input=server_private_key, capture_output=True, text=True, check=True)
+            return proc.stdout.strip()
+        except subprocess.CalledProcessError:
+            pass
+    
+    # Pure Python fallback: derive public key from private key
+    try:
+        from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
+        import base64 as b64
+        priv_key_bytes = b64.b64decode(server_private_key)
+        priv_key_obj = X25519PrivateKey.from_private_bytes(priv_key_bytes)
+        pub_key_bytes = priv_key_obj.public_key().public_bytes_raw()
+        return b64.b64encode(pub_key_bytes).decode()
+    except Exception as e:
+        logger.warning(f"Could not derive server public key: {e}")
+        return ""
 
 async def get_next_available_ip(db: AsyncSession) -> str:
     """Find the next available IP in the 10.8.0.x subnet."""

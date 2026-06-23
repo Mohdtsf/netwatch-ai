@@ -43,7 +43,7 @@ class PeerResponse(BaseModel):
     class Config:
         from_attributes = True
 
-@router.get("/peers", response_model=List[PeerResponse], dependencies=[Depends(require_role(["admin", "analyst", "viewer"]))])
+@router.get("/peers", response_model=List[PeerResponse], dependencies=[Depends(require_role("viewer"))])
 async def list_peers(db: AsyncSession = Depends(get_db)):
     """List all VPN peers and their connection status."""
     stmt = select(VpnPeer).order_by(VpnPeer.created_at.desc())
@@ -51,13 +51,13 @@ async def list_peers(db: AsyncSession = Depends(get_db)):
     peers = result.scalars().all()
     return peers
 
-@router.post("/peers", response_model=PeerResponse, dependencies=[Depends(require_role(["admin"]))])
+@router.post("/peers", response_model=PeerResponse, dependencies=[Depends(require_role("admin"))])
 async def add_peer(peer_in: PeerCreate, db: AsyncSession = Depends(get_db)):
     """Generate a new peer, returning the keys and config."""
     peer = await create_peer(db, peer_in.peer_name, peer_in.device_id, peer_in.tunnel_mode)
     return peer
 
-@router.delete("/peers/{peer_id}", dependencies=[Depends(require_role(["admin"]))])
+@router.delete("/peers/{peer_id}", dependencies=[Depends(require_role("admin"))])
 async def revoke_peer(peer_id: str, db: AsyncSession = Depends(get_db)):
     """Revoke a peer and hot-reload WireGuard configuration."""
     stmt = select(VpnPeer).where(VpnPeer.id == peer_id)
@@ -74,7 +74,7 @@ async def revoke_peer(peer_id: str, db: AsyncSession = Depends(get_db)):
     
     return {"message": "Peer revoked successfully"}
 
-@router.get("/peers/{peer_id}/qrcode", dependencies=[Depends(require_role(["admin", "analyst"]))])
+@router.get("/peers/{peer_id}/qrcode", dependencies=[Depends(require_role("analyst"))])
 async def get_peer_qrcode(peer_id: str, db: AsyncSession = Depends(get_db)):
     """Retrieve base64 QR code for a peer's configuration."""
     stmt = select(VpnPeer).where(VpnPeer.id == peer_id)
@@ -90,7 +90,7 @@ async def get_peer_qrcode(peer_id: str, db: AsyncSession = Depends(get_db)):
     
     return {"qrcode": qr_b64}
 
-@router.get("/peers/{peer_id}/config", response_class=PlainTextResponse, dependencies=[Depends(require_role(["admin", "analyst"]))])
+@router.get("/peers/{peer_id}/config", response_class=PlainTextResponse, dependencies=[Depends(require_role("analyst"))])
 async def get_peer_config(peer_id: str, db: AsyncSession = Depends(get_db)):
     """Download the raw .conf file for a peer."""
     stmt = select(VpnPeer).where(VpnPeer.id == peer_id)
