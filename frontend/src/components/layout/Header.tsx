@@ -1,10 +1,25 @@
 'use client';
 
-import { Menu, Bell, User } from 'lucide-react';
+import { Menu, Bell, User, LogOut } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
+import api from '@/lib/api';
+import { useRouter } from 'next/navigation';
 
 export default function Header() {
-  const { toggleSidebar, activeAlertsCount } = useAppStore();
+  const { toggleSidebar, activeAlertsCount, user, setUser } = useAppStore();
+  const router = useRouter();
+
+  const handleLogout = async () => {
+    try {
+      await api.post('/auth/logout');
+    } catch (e) {
+      console.error("Logout failed", e);
+    } finally {
+      localStorage.removeItem('access_token');
+      setUser(null);
+      router.push('/login');
+    }
+  };
 
   return (
     <header className="h-16 bg-card border-b border-border flex items-center justify-between px-4 sticky top-0 z-10">
@@ -25,11 +40,22 @@ export default function Header() {
           )}
         </button>
         
-        <div className="flex items-center gap-2 pl-4 border-l border-border">
-          <div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center text-slate-300">
-            <User className="w-4 h-4" />
+        <div className="flex items-center gap-4 pl-4 border-l border-border">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center text-slate-300">
+              <User className="w-4 h-4" />
+            </div>
+            <span className="text-sm font-medium text-slate-300">
+              {user ? user.username : 'Admin'}
+            </span>
           </div>
-          <span className="text-sm font-medium text-slate-300">Admin</span>
+          <button 
+            onClick={handleLogout}
+            className="p-2 text-slate-400 hover:text-danger rounded-md hover:bg-slate-800 transition-colors"
+            title="Logout"
+          >
+            <LogOut className="w-4 h-4" />
+          </button>
         </div>
       </div>
     </header>

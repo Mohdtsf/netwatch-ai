@@ -32,48 +32,6 @@ class AuthService:
         self.db = db
         self.redis = redis
 
-    async def register(self, data: RegisterRequest) -> User:
-        """Register a new user account."""
-        # Check username uniqueness
-        result = await self.db.execute(
-            select(User).where(User.username == data.username)
-        )
-        if result.scalar_one_or_none():
-            from fastapi import HTTPException, status
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Username already exists",
-            )
-
-        # Check email uniqueness
-        result = await self.db.execute(
-            select(User).where(User.email == data.email)
-        )
-        if result.scalar_one_or_none():
-            from fastapi import HTTPException, status
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Email already registered",
-            )
-
-        # Determine role: first user gets admin
-        user_count = await self.db.execute(select(func.count(User.id)))
-        count = user_count.scalar() or 0
-        role = "admin" if count == 0 else "viewer"
-
-        # Create user
-        user = User(
-            username=data.username,
-            email=data.email,
-            password_hash=hash_password(data.password),
-            role=role,
-        )
-        self.db.add(user)
-        await self.db.commit()
-        await self.db.refresh(user)
-
-        logger.info(f"User registered: {user.username} (role={role})")
-        return user
 
     async def login(self, data: LoginRequest) -> Tuple[str, str, User]:
         """Authenticate user and return access + refresh tokens."""

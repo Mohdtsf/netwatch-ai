@@ -7,7 +7,7 @@ import Header from "@/components/layout/Header";
 
 export default function ClientLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const isAuthPage = pathname === '/login' || pathname === '/register';
+  const isAuthPage = pathname === '/login';
 
   if (isAuthPage) {
     return (

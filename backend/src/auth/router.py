@@ -33,30 +33,6 @@ def _get_auth_service(db: AsyncSession, redis=None) -> AuthService:
     return AuthService(db=db, redis=redis)
 
 
-@router.post(
-    "/register",
-    response_model=UserResponse,
-    status_code=status.HTTP_201_CREATED,
-    summary="Register a new user account",
-)
-@limiter.limit(RATE_REGISTER)
-async def register(
-    request: Request,
-    data: RegisterRequest,
-    db: AsyncSession = Depends(get_db),
-):
-    """
-    Create a new user account.
-    The first user registered is automatically promoted to admin.
-    """
-    try:
-        redis = await get_redis()
-    except RuntimeError:
-        redis = None
-
-    service = _get_auth_service(db, redis)
-    user = await service.register(data)
-    return UserResponse.model_validate(user)
 
 
 @router.post(
